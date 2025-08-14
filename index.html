@@ -196,7 +196,13 @@ function sizeStr(r){
   return `${fmt(L,0)}x${fmt(W,0)}x${fmt(H,0)}`.toLowerCase();
 }
 
-function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, function(m){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m];
+  });
+}
+
 
 
 function showFocus(r){
