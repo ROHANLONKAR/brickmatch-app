@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BrickMatch – Offline Finder</title>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--muted:#334155;--text:#e5e7eb;--accent:#22c55e;--danger:#ef4444;}
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);color:var(--text)}
+    header{padding:16px 20px;border-bottom:1px solid #1f2937;position:sticky;top:0;background:#0b1220a6;backdrop-filter: blur(6px)}
+    header h1{margin:0;font-size:20px}
+    main{max-width:980px;margin:28px auto;padding:0 16px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .card{background:linear-gradient(180deg,#0b0f1a,#0f172a);border:1px solid #1f2937;border-radius:16px;padding:16px;box-shadow: 0 10px 30px rgba(0,0,0,.25)}
+    .input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid #263243;background:#0b1220;color:var(--text)}
+    .btn{padding:10px 14px;border-radius:12px;border:1px solid #263243;background:#111827;color:var(--text);cursor:pointer}
+    .btn.primary{background:#16a34a;border-color:#16a34a;color:#07140a;font-weight:600}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#0b1220;border:1px solid #253041;margin-right:6px;color:#93c5fd}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:10px;border-bottom:1px solid #1f2937;text-align:left;font-size:14px}
+    th{color:#93c5fd;background:#0b1220;position:sticky;top:66px}
+    tr:hover{background:#0b1220}
+    .muted{color:#9ca3af;font-size:12px}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    @media (max-width:760px){ .grid{grid-template-columns:1fr} }
+    .red{color:#f87171}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .right{ text-align:right }
+    .small{font-size:12px;color:#9ca3af}
+    .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+    .kpi .box{background:#0b1220;border:1px solid #223046;border-radius:12px;padding:12px}
+    .box h3{margin:0 0 6px 0;font-size:13px;color:#9ca3af}
+    .box div{font-size:18px;font-weight:700}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>BrickMatch – Offline Finder</h1>
+    <div class="small">Works 100% on-device. Load your CSV once, then search by code or name.</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="row">
+        <input id="search" class="input" placeholder='Search e.g. "fc", "Longreach cored", "230x110x76"' autofocus />
+        <button id="clear" class="btn">Clear</button>
+      </div>
+      <div class="small" style="margin-top:6px">Tip: type a code (e.g. <span class="mono">fc</span>) or any word from the title/type.</div>
+      <div style="margin-top:12px" class="row">
+        <input type="file" id="file" accept=".csv" class="btn" />
+        <button id="save" class="btn">Save to device</button>
+        <button id="wipe" class="btn" title="Remove saved dataset">Forget saved data</button>
+        <span id="status" class="pill">No data loaded</span>
+        <a id="template" class="pill" href="data.csv" download>CSV template</a>
+      </div>
+    </section>
+
+    <section id="focus" class="card" style="margin-top:16px; display:none"></section>
+
+    <section class="card" style="margin-top:16px">
+      <table id="results">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Size (L×W×H mm)</th>
+            <th class="right">$/each</th>
+            <th class="right">pcs/m²</th>
+            <th class="right">$ /m²</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="small" id="count"></div>
+    </section>
+  </main>
+
+<script>
+/** CSV columns (case-insensitive):
+ * code,title,type,length_mm,width_mm,height_mm,price_each,pieces_per_m2,price_per_m2
+ */
+let DATA = [];
+
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+function parseCSV(text){
+  const lines = text.trim().split(/\r?\n/);
+  const headers = lines[0].split(',').map(h=>h.trim().toLowerCase());
+  const idx = name => headers.indexOf(name);
+  const rows = [];
+  for(let i=1;i<lines.length;i++){
+    if(!lines[i].trim()) continue;
+    const cols = safeSplit(lines[i]);
+    const row = {
+      code: getStr(cols[idx('code')]),
+      title: getStr(cols[idx('title')]),
+      type: getStr(cols[idx('type')]),
+      length_mm: toNum(cols[idx('length_mm')]),
+      width_mm: toNum(cols[idx('width_mm')]),
+      height_mm: toNum(cols[idx('height_mm')]),
+      price_each: toNum(cols[idx('price_each')]),
+      pieces_per_m2: toNum(cols[idx('pieces_per_m2')]),
+      price_per_m2: toNum(cols[idx('price_per_m2')]),
+    };
+    rows.push(row);
+  }
+  return rows;
+}
+function safeSplit(line){
+  // basic CSV split supporting quoted commas
+  const out=[], cur=[]; let q=false;
+  for (let i=0;i<line.length;i++){
+    const c=line[i];
+    if(c==='"'){ q=!q; continue; }
+    if(c===',' && !q){ out.push(cur.join('')); cur.length=0; }
+    else cur.push(c);
+  }
+  out.push(cur.join(''));
+  return out.map(s=>s.trim());
+}
+function getStr(v){ return (v||'').toString(); }
+function toNum(v){ const n=parseFloat((v||'').toString().replace(/[^0-9.\-]/g,'')); return isNaN(n)?null:n; }
+
+function fmt(n, decimals=2){
+  if(n===null || n===undefined || isNaN(n)) return '—';
+  return Number(n).toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals});
+}
+
+
+function loadSaved(){
+  // 1) Try localStorage (offline saved dataset)
+  const raw = localStorage.getItem('brickmatch_csv');
+  if(raw){
+    DATA = JSON.parse(raw);
+    setStatus(`Loaded ${DATA.length} items from device`);
+    render();
+    return true;
+  }
+  // 2) If not found, try fetching data.csv (for GitHub Pages)
+  fetch('data.csv',{cache:'no-store'})
+    .then(r=> r.ok ? r.text() : Promise.reject())
+    .then(text=>{
+      DATA = parseCSV(text);
+      setStatus(`Loaded ${DATA.length} items from data.csv`);
+      render($('#search').value);
+    })
+    .catch(()=>{
+      setStatus('No data loaded — choose a CSV');
+    });
+  return false;
+}
+ items from device`);
+  render();
+  return true;
+}
+
+function setStatus(text){ $('#status').textContent = text; }
+
+function render(q=''){
+  q = q.trim().toLowerCase();
+  let rows = DATA;
+  if(q){
+    rows = rows.filter(r=> 
+      (r.code||'').toLowerCase().includes(q) ||
+      (r.title||'').toLowerCase().includes(q) ||
+      (r.type||'').toLowerCase().includes(q) ||
+      (sizeStr(r)||'').includes(q)
+    );
+  }
+  const tbody = $('#results tbody');
+  tbody.innerHTML = '';
+  rows.forEach(r=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${escapeHtml(r.code)}</td>
+      <td><span class="red">${escapeHtml(r.title)}</span></td>
+      <td>${escapeHtml(r.type||'')}</td>
+      <td class="mono">${sizeStr(r)}</td>
+      <td class="right">$ ${fmt(r.price_each)}</td>
+      <td class="right">${fmt(r.pieces_per_m2,1)}</td>
+      <td class="right">$ ${fmt(r.price_per_m2)}</td>
+    `;
+    tr.addEventListener('click',()=>showFocus(r));
+    tbody.appendChild(tr);
+  });
+  $('#count').textContent = rows.length ? `${rows.length} item(s)` : 'No matches';
+  if(rows.length===1) showFocus(rows[0]); else $('#focus').style.display='none';
+}
+
+function sizeStr(r){
+  const L = r.length_mm, W = r.width_mm, H = r.height_mm;
+  if([L,W,H].some(x=>x==null)) return '';
+  return `${fmt(L,0)}x${fmt(W,0)}x${fmt(H,0)}`.toLowerCase();
+}
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
+
+function showFocus(r){
+  const el = $('#focus');
+  el.style.display='block';
+  el.innerHTML = `
+    <div class="row" style="align-items:center;justify-content:space-between">
+      <div>
+        <div class="pill mono">${escapeHtml(r.code)}</div>
+        <div class="red" style="font-weight:800;font-size:22px">${escapeHtml(r.title)}</div>
+        <div class="muted">${escapeHtml(r.type||'')}</div>
+        <div class="muted mono">Size: ${sizeStr(r)} mm</div>
+      </div>
+      <div class="row" style="gap:10px">
+        <div>
+          <label class="small">Area (m²)</label>
+          <input id="m2" type="number" min="0" step="0.01" value="1" class="input" style="width:130px"/>
+        </div>
+        <div>
+          <label class="small">Pieces</label>
+          <input id="pcs" type="number" min="0" step="1" value="" class="input" style="width:130px"/>
+        </div>
+      </div>
+    </div>
+    <div class="kpi">
+      <div class="box"><h3>1) Price per piece</h3><div>$ ${fmt(r.price_each)}</div></div>
+      <div class="box"><h3>2) Price per m²</h3><div>$ ${fmt(r.price_per_m2)}</div></div>
+      <div class="box"><h3>3) Pieces per m²</h3><div>${fmt(r.pieces_per_m2,1)}</div></div>
+    </div>
+    <div class="kpi">
+      <div class="box"><h3>Total pieces for area</h3><div id="piecesTotal">—</div></div>
+      <div class="box"><h3>Total $ for area</h3><div id="priceTotal">—</div></div>
+      <div class="box"><h3>Notes</h3><div class="small">Enter either m² or pieces — the other updates automatically.</div></div>
+    </div>
+  `;
+  const pcsPerM2 = r.pieces_per_m2 || 0;
+  const $m2 = $('#m2');
+  const $pcs = $('#pcs');
+  let lastEdited = 'm2';
+
+  const clamp = (x)=> isFinite(x) && x>=0 ? x : 0;
+
+  const recalcFromM2 = ()=>{
+    const m2 = clamp(parseFloat($m2.value||'0'));
+    if(pcsPerM2){
+      const pcs = m2 * pcsPerM2;
+      $pcs.value = pcs ? Math.round(pcs) : '';
+    }
+    updateTotals();
+  };
+
+  const recalcFromPieces = ()=>{
+    const pcs = clamp(parseFloat($pcs.value||'0'));
+    if(pcsPerM2){
+      const m2 = pcs / pcsPerM2;
+      $m2.value = m2 ? m2.toFixed(2) : '';
+    }
+    updateTotals();
+  };
+
+  const updateTotals = ()=>{
+    const m2 = clamp(parseFloat($m2.value||'0'));
+    const pcs = clamp(parseFloat($pcs.value||'0'));
+    const m2Eff = m2 || (pcsPerM2 ? pcs / pcsPerM2 : 0);
+    const pcsEff = pcs || (pcsPerM2 ? m2 * pcsPerM2 : 0);
+    const price = (r.price_per_m2||0) * m2Eff;
+    $('#piecesTotal').textContent = pcsEff ? fmt(pcsEff,1) + ' pcs' : '—';
+    $('#priceTotal').textContent  = price ? '$ ' + fmt(price) : '—';
+  };
+
+  $m2.addEventListener('input', ()=>{ lastEdited='m2'; recalcFromM2(); });
+  $pcs.addEventListener('input', ()=>{ lastEdited='pcs'; recalcFromPieces(); });
+
+  recalcFromM2();
+}
+
+
+$('#file').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const text = await file.text();
+  DATA = parseCSV(text);
+  setStatus(`Loaded ${DATA.length} items from file`);
+  render($('#search').value);
+});
+
+$('#save').addEventListener('click', ()=>{
+  localStorage.setItem('brickmatch_csv', JSON.stringify(DATA));
+  setStatus(`Saved ${DATA.length} items to device`);
+});
+
+$('#wipe').addEventListener('click', ()=>{
+  localStorage.removeItem('brickmatch_csv');
+  setStatus('Saved data removed');
+});
+
+$('#clear').addEventListener('click', ()=>{
+  $('#search').value=''; render('');
+});
+
+$('#search').addEventListener('input', (e)=>{
+  render(e.target.value);
+});
+
+// Try to load from localStorage on first run
+loadSaved();
+
+</script>
+</body>
+</html>

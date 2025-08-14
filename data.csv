@@ -1,0 +1,4 @@
+code,title,type,length_mm,width_mm,height_mm,price_each,pieces_per_m2,price_per_m2
+fc,Face Common Brick,Cored,230,110,76,3.8,48.5,184.3
+fs,Face Common Brick,Solid,230,110,76,4.0,48.5,194.0
+flc,Face Longreach / Modular 76,Longreach Cored,290,90,76,4.9,37.0,181.4
