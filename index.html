@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>BrickMatch – Offline Finder</title>
+  <!-- tiny inline favicon to avoid 404 -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='8' y='28' width='48' height='20' fill='%23f87171'/%3E%3Crect x='8' y='16' width='48' height='8' fill='%2393c5fd'/%3E%3C/svg%3E">
   <style>
     :root{--bg:#0f172a;--card:#111827;--muted:#334155;--text:#e5e7eb;--accent:#22c55e;--danger:#ef4444;}
     *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif}
@@ -84,7 +86,6 @@
 let DATA = [];
 
 const $ = sel => document.querySelector(sel);
-const $$ = sel => Array.from(document.querySelectorAll(sel));
 
 function parseCSV(text){
   const lines = text.trim().split(/\r?\n/);
@@ -110,7 +111,6 @@ function parseCSV(text){
   return rows;
 }
 function safeSplit(line){
-  // basic CSV split supporting quoted commas
   const out=[], cur=[]; let q=false;
   for (let i=0;i<line.length;i++){
     const c=line[i];
@@ -123,19 +123,25 @@ function safeSplit(line){
 }
 function getStr(v){ return (v||'').toString(); }
 function toNum(v){ const n=parseFloat((v||'').toString().replace(/[^0-9.\-]/g,'')); return isNaN(n)?null:n; }
+function fmt(n, decimals=2){ if(n===null || n===undefined || isNaN(n)) return '—'; return Number(n).toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals}); }
 
-function fmt(n, decimals=2){
-  if(n===null || n===undefined || isNaN(n)) return '—';
-  return Number(n).toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals});
-}
-
-function loadSaved(){
+// Load dataset: prefer localStorage, else fetch data.csv (for GitHub Pages)
+function loadData(){
   const raw = localStorage.getItem('brickmatch_csv');
-  if(!raw) return false;
-  DATA = JSON.parse(raw);
-  setStatus(`Loaded ${DATA.length} items from device`);
-  render();
-  return true;
+  if (raw){
+    DATA = JSON.parse(raw);
+    setStatus(`Loaded ${DATA.length} items from device`);
+    render();
+    return;
+  }
+  fetch('data.csv', {cache:'no-store'})
+    .then(r => r.ok ? r.text() : Promise.reject())
+    .then(text => {
+      DATA = parseCSV(text);
+      setStatus(`Loaded ${DATA.length} items from data.csv`);
+      render($('#search').value||'');
+    })
+    .catch(() => setStatus('No data loaded — choose a CSV'));
 }
 
 function setStatus(text){ $('#status').textContent = text; }
@@ -144,14 +150,14 @@ function render(q=''){
   q = q.trim().toLowerCase();
   let rows = DATA;
   if(q){
-    rows = rows.filter(r=> 
+    rows = rows.filter(r=>
       (r.code||'').toLowerCase().includes(q) ||
       (r.title||'').toLowerCase().includes(q) ||
       (r.type||'').toLowerCase().includes(q) ||
       (sizeStr(r)||'').includes(q)
     );
   }
-  const tbody = $('#results tbody');
+  const tbody = document.querySelector('#results tbody');
   tbody.innerHTML = '';
   rows.forEach(r=>{
     const tr = document.createElement('tr');
@@ -167,8 +173,8 @@ function render(q=''){
     tr.addEventListener('click',()=>showFocus(r));
     tbody.appendChild(tr);
   });
-  $('#count').textContent = rows.length ? `${rows.length} item(s)` : 'No matches';
-  if(rows.length===1) showFocus(rows[0]); else $('#focus').style.display='none';
+  document.querySelector('#count').textContent = rows.length ? `${rows.length} item(s)` : 'No matches';
+  if(rows.length===1) showFocus(rows[0]); else document.querySelector('#focus').style.display='none';
 }
 
 function sizeStr(r){
@@ -177,11 +183,14 @@ function sizeStr(r){
   return `${fmt(L,0)}x${fmt(W,0)}x${fmt(H,0)}`.toLowerCase();
 }
 
-function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, function(m){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m];
+  });
+}
 
 function showFocus(r){
-  const el = $('#focus');
+  const el = document.querySelector('#focus');
   el.style.display='block';
   el.innerHTML = `
     <div class="row" style="align-items:center;justify-content:space-between">
@@ -214,9 +223,8 @@ function showFocus(r){
     </div>
   `;
   const pcsPerM2 = r.pieces_per_m2 || 0;
-  const $m2 = $('#m2');
-  const $pcs = $('#pcs');
-  let lastEdited = 'm2';
+  const $m2 = document.querySelector('#m2');
+  const $pcs = document.querySelector('#pcs');
 
   const clamp = (x)=> isFinite(x) && x>=0 ? x : 0;
 
@@ -244,47 +252,41 @@ function showFocus(r){
     const m2Eff = m2 || (pcsPerM2 ? pcs / pcsPerM2 : 0);
     const pcsEff = pcs || (pcsPerM2 ? m2 * pcsPerM2 : 0);
     const price = (r.price_per_m2||0) * m2Eff;
-    $('#piecesTotal').textContent = pcsEff ? fmt(pcsEff,1) + ' pcs' : '—';
-    $('#priceTotal').textContent  = price ? '$ ' + fmt(price) : '—';
+    document.querySelector('#piecesTotal').textContent = pcsEff ? fmt(pcsEff,1) + ' pcs' : '—';
+    document.querySelector('#priceTotal').textContent  = price ? '$ ' + fmt(price) : '—';
   };
 
-  $m2.addEventListener('input', ()=>{ lastEdited='m2'; recalcFromM2(); });
-  $pcs.addEventListener('input', ()=>{ lastEdited='pcs'; recalcFromPieces(); });
-
+  $m2.addEventListener('input', recalcFromM2);
+  $pcs.addEventListener('input', recalcFromPieces);
   recalcFromM2();
 }
 
-
-$('#file').addEventListener('change', async (e)=>{
+// File choose / save / clear handlers
+document.querySelector('#file').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
   const text = await file.text();
   DATA = parseCSV(text);
   setStatus(`Loaded ${DATA.length} items from file`);
-  render($('#search').value);
+  render(document.querySelector('#search').value||'');
 });
-
-$('#save').addEventListener('click', ()=>{
+document.querySelector('#save').addEventListener('click', ()=>{
   localStorage.setItem('brickmatch_csv', JSON.stringify(DATA));
   setStatus(`Saved ${DATA.length} items to device`);
 });
-
-$('#wipe').addEventListener('click', ()=>{
+document.querySelector('#wipe').addEventListener('click', ()=>{
   localStorage.removeItem('brickmatch_csv');
   setStatus('Saved data removed');
 });
-
-$('#clear').addEventListener('click', ()=>{
-  $('#search').value=''; render('');
+document.querySelector('#clear').addEventListener('click', ()=>{
+  document.querySelector('#search').value=''; render('');
 });
-
-$('#search').addEventListener('input', (e)=>{
+document.querySelector('#search').addEventListener('input', (e)=>{
   render(e.target.value);
 });
 
-// Try to load from localStorage on first run
-loadSaved();
-
+// Boot
+loadData();
 </script>
 </body>
 </html>
